@@ -3,396 +3,201 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>THE GRASSROOTS POST</title>
-    
-
-<script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900;500&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'primary-green': '#38A169', // A vibrant green for accents
-                        'dark-green-header': '#1A6044', // Darker green for the top bar
-                        'dark-text': '#1A202C',
-                        'light-bg': '#F7FAFC',
-                        'dark-footer': '#2D3748',
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
-                }
-            }
-        }
-    </script>
+    <title>The Grassroots Post - Unrivaled Match Reporting</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
     <style>
-        .header-title {
-            font-size: 3.5rem;
-            line-height: 1.1;
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
         }
-        @media (max-width: 640px) {
-             .header-title {
-                font-size: 2.5rem;
-            }
+        /* Custom colors based on the design */
+        .color-primary-dark { background-color: #172554; } /* Navy/Dark Blue for Footer */
+        .color-primary-light { background-color: #E0E7FF; } /* Very Light Blue */
+        .color-accent { background-color: #059669; } /* Emerald Green */
+        .text-color-primary { color: #172554; }
+        .text-color-accent { color: #059669; }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
+        
+        /* Utility classes for responsive design */
+        .sidebar-widget {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1.5rem;
         }
-        /* Modal Backdrop */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.75);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 50;
-            /* Hidden by default */
-            display: none; 
-        }
-        /* Make modal active when shown */
-        .modal-overlay.active {
-            display: flex;
-        }
-        /* Style for the new report button section */
-        .new-report-card {
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .new-report-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(56, 161, 105, 0.1), 0 4px 6px -2px rgba(56, 161, 105, 0.05);
+        /* Style for the full-screen modal/editor */
+        #editor-modal {
+            z-index: 50; /* Above everything else */
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
         }
     </style>
 </head>
-<body class="bg-light-bg font-sans text-dark-text">
+<body>
 
-    
-
-<script type="module">
+    <!-- Firebase SDKs (MUST be included before any custom script) -->
+    <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { 
-            getFirestore, 
-            collection, 
-            addDoc, 
-            query, 
-            where, 
-            orderBy, 
-            limit, 
-            onSnapshot, 
-            setLogLevel 
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, query, limit, onSnapshot, orderBy, setDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global state for Firebase (MANDATORY for modal submission)
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        // IMPORTANT: Use the global variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        let app, db, auth, userId = null;
-        let isAuthReady = false;
+        setLogLevel('Debug'); // Enable Firestore logging
 
-        // Function to get the correct Firestore collection path
-        const getPostsCollectionRef = (dbInstance, currentUserId) => {
-            // Private user data path: /artifacts/{appId}/users/{userId}/posts
-            return collection(dbInstance, `artifacts/${appId}/users/${currentUserId}/posts`);
-        };
-
-        // Helper to format date
-        const formatDate = (timestamp) => {
-            if (!timestamp) return 'Unknown Date';
-            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-        };
-
-        // --- Firebase Initialization and Auth ---
-
-        const initFirebase = () => {
-            try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Set Firestore log level for debugging
-                setLogLevel('Debug');
-                
-                // Sign in logic
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
-                        // We will NOT call fetchAndRenderPosts() here, to keep static content.
-                        // However, the modal submission will still work.
-                    } else {
-                        // Attempt to sign in using the custom token or anonymously
-                        try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (error) {
-                            console.error("Firebase Auth Error:", error);
-                        }
-                    }
-                });
-
-            } catch (error) {
-                console.error("Firebase Initialization Failed:", error);
-                document.getElementById('user-id-display').textContent = `Firebase Error: Check console.`;
-            }
-        };
-
-        // --- Post Submission Logic ---
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
         
-        const submitPost = async (event) => {
-            event.preventDefault();
-            
-            if (!db || !userId) {
-                // Display error in modal, not just console
-                document.getElementById('modal-message').textContent = 'Database connection not ready. Ensure Firebase config is set up. Try again in a moment.';
-                console.error("Database connection or User ID not ready for submission.");
-                return;
-            }
+        // Expose to global scope for use in the HTML script block
+        window.db = db;
+        window.auth = auth;
+        window.appId = appId;
+        window.initialAuthToken = initialAuthToken;
+        window.onAuthStateChanged = onAuthStateChanged;
+        window.signInAnonymously = signInAnonymously;
+        window.signInWithCustomToken = signInWithCustomToken;
+        window.onSnapshot = onSnapshot;
+        window.collection = collection;
+        window.query = query;
+        window.limit = limit;
+        window.orderBy = orderBy;
+        window.doc = doc;
+        window.setDoc = setDoc;
 
-            const form = event.target;
-            const post = {
-                title: form.title.value,
-                type: form.type.value,
-                category: form.type.value === 'MATCH_REPORT' ? form.category.value : 'General Investigation',
-                content: form.content.value,
-                timestamp: new Date(),
-                userId: userId
-            };
-
-            const postsRef = getPostsCollectionRef(db, userId);
-
+        // Start Auth process and then load data
+        window.setupFirebaseAndLoadContent = async () => {
             try {
-                const submitButton = document.getElementById('submit-button');
-                submitButton.disabled = true;
-                submitButton.textContent = 'Saving...';
-                await addDoc(postsRef, post);
-                form.reset();
-                hideModal();
-                alert("Report successfully submitted! It will appear when dynamic content is enabled."); // User feedback
-                console.log("Post successfully saved to Firebase.");
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                // Once authenticated, the auth state listener will trigger loadContent
             } catch (error) {
-                console.error("Error adding document: ", error);
-                document.getElementById('modal-message').textContent = 'Error saving post. Check console for details and Firebase setup.';
-            } finally {
-                const submitButton = document.getElementById('submit-button');
-                submitButton.disabled = false;
-                submitButton.textContent = 'Submit Report';
+                console.error("Firebase Auth Error:", error);
             }
         };
 
-        // --- Modal Control Logic ---
-        const modal = document.getElementById('new-report-modal');
-
-        const showModal = () => {
-            modal.classList.add('active');
-        }
-
-        const hideModal = () => {
-            document.getElementById('post-form').reset();
-            document.getElementById('modal-message').textContent = '';
-            modal.classList.remove('active');
-        }
-
-        // Attach event listeners after the DOM is loaded
-        window.onload = () => {
-            initFirebase();
-            
-            document.getElementById('new-report-card').addEventListener('click', showModal); 
-            document.getElementById('close-modal-btn').addEventListener('click', hideModal);
-            document.getElementById('post-form').addEventListener('submit', submitPost);
+        window.setupAuthListener = (callback) => {
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    // User is signed in (either custom token or anonymously)
+                    console.log("Auth State: Signed in. User ID:", user.uid);
+                    callback(user.uid);
+                } else {
+                    // User is signed out
+                    console.log("Auth State: Signed out.");
+                    callback(null);
+                }
+            });
         };
     </script>
 
-
-    
-    <!-- New Top Bar -->
-    <div class="bg-dark-green-header h-2"></div>
-
-    <nav class="bg-white shadow-md">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16 items-center">
-                
-
-<div class="flex-shrink-0">
-                    <span class="text-xl font-extrabold text-dark-text tracking-wider">THE GRASSROOTS POST</span>
-                </div>
-                
-
-<div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-                    <a href="#" class="text-dark-text hover:text-primary-green transition duration-150 ease-in-out px-3 py-2 text-sm font-semibold">MATCH REPORTS</a>
-                    <a href="#" class="text-dark-text hover:text-primary-green transition duration-150 ease-in-out px-3 py-2 text-sm font-semibold">GRASSROOTS INVESTIGATIONS</a>
-                    <a href="#" class="text-dark-text hover:text-primary-green transition duration-150 ease-in-out px-3 py-2 text-sm font-semibold">CONTACT</a>
-                </div>
-            </div>
-        </div>
-    </nav>
-
-    
-
-<header class="py-12 bg-white border-b border-gray-200">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h1 class="header-title font-extrabold text-dark-text">
-                THE GRASSROOTS GAME
-            </h1>
-            <p class="text-xl text-gray-600 mt-2">
-                Unrivaled match reporting and deep investigative features on youth football in Birmingham and the Midlands.
-            </p>
-             <p id="user-id-display" class="text-xs text-gray-400 mt-4">User ID: Loading...</p>
+    <!-- Header / Nav Bar -->
+    <header class="bg-white sticky top-0 z-10">
+        <!-- New green bar at the very top -->
+        <div class="color-accent h-2 w-full"></div> 
+        
+        <!-- Header Content -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center py-4">
+            <h1 class="text-xl font-extrabold text-gray-800 tracking-wider">THE GRASSROOTS POST</h1>
+            <nav class="hidden md:flex space-x-8 text-sm font-semibold text-gray-700">
+                <a href="#" class="hover:text-color-accent transition duration-150">MATCH REPORTS</a>
+                <a href="#" class="hover:text-color-accent transition duration-150">GRASSROOTS INVESTIGATIONS</a>
+                <a href="#" class="hover:text-color-accent transition duration-150">CONTACT</a>
+            </nav>
         </div>
     </header>
 
-    
+    <!-- Main Content Area -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
-<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
-        <div class="lg:grid lg:grid-cols-3 lg:gap-8">
+        <!-- Hero Section -->
+        <section class="mb-12">
+            <h2 class="text-5xl font-extrabold text-gray-800 mb-2">THE GRASSROOTS GAME</h2>
+            <p class="text-xl text-gray-600 mb-6">Unrivaled match reporting and deep investigative features on youth football in Birmingham and the Midlands.</p>
+            <p class="text-sm text-gray-500" id="user-info-display">User ID: Loading...</p>
+        </section>
+        
+        <!-- Main Grid Layout -->
+        <div class="grid lg:grid-cols-3 gap-10">
 
-            
+            <!-- Primary Content Column (Reports/Investigations) -->
+            <div class="lg:col-span-2">
 
-<div class="lg:col-span-2 space-y-12">
-
-                
-
-<section class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-primary-green">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        
-
-<div class="md:col-span-2 bg-gray-200 rounded-lg h-64 flex items-center justify-center text-gray-500 font-medium">
-                            VISUAL: Youth Team Action Placeholder
-                        </div>
-                        
-
-<div class="md:col-span-1 flex flex-col justify-between">
-                            <div>
-                                <p class="text-sm font-bold text-primary-green uppercase tracking-wider mb-2">INVESTIGATION</p>
-                                <h2 class="text-2xl font-extrabold text-dark-text mb-3 leading-snug">
-                                    The Price of Potential: How Pitch Fees Are Squeezing Birmingham's Talent Pipeline
-                                </h2>
-                                <p class="text-gray-600 text-sm mb-4 line-clamp-4">
-                                    An investigation into the rising costs of youth football, and the systemic barriers preventing low-income families from participating in the game.
-                                </p>
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Published Today by [Your Name]
-                            </div>
-                        </div>
+                <!-- Featured Investigation (Simulated) -->
+                <section class="mb-10 p-6 bg-white border border-gray-200 rounded-xl card-shadow flex flex-col md:flex-row gap-6">
+                    <div class="w-full md:w-1/3 bg-gray-100 rounded-lg flex items-center justify-center aspect-video md:aspect-square shrink-0">
+                        <span class="text-gray-400 font-medium text-sm">VISUAL: Youth Team Action Placeholder</span>
+                    </div>
+                    <div class="md:w-2/3">
+                        <p class="text-xs font-bold tracking-wider text-color-accent uppercase mb-1">INVESTIGATION</p>
+                        <h3 class="text-2xl font-bold text-gray-800 mb-3 leading-snug">The Price of Potential: How Pitch Fees Are Squeezing Birmingham's Talent Pipeline</h3>
+                        <p class="text-gray-600 mb-4 text-sm">An investigation into the rising costs of local facilities and the systemic barriers preventing low-income families from keeping kids in the game.</p>
+                        <p class="text-xs text-gray-500">Published Today by [Your Name]</p>
                     </div>
                 </section>
-                
-                
 
-<section>
-                    <h2 class="text-3xl font-extrabold text-dark-text mb-6">Latest Match Reports</h2>
-                    
-                    
+                <!-- Latest Match Reports Heading -->
+                <h3 class="text-3xl font-bold text-gray-800 mb-6">Latest Match Reports</h3>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        
-
-<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
-                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
-                                Team Badge Placeholder
-                            </div>
-                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: MIDLANDS LEAGUE</p>
-                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
-                                South Birmingham United Grind Out a Desperate 1-0 Win Over Lye Town
-                            </h3>
-                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
-                        </div>
-                        
-
-<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
-                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
-                                Team Badge Placeholder
-                            </div>
-                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: RESERVES</p>
-                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
-                                Westside Reserves Show Flashes of Brilliance in 3-3 Thriller
-                            </h3>
-                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
-                        </div>
-                        
-
-<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
-                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
-                                Team Badge Placeholder
-                            </div>
-                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: ACADEMY FIXTURE</p>
-                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
-                                Lichfield City's Midfield Overrun: Defensive Concerns After 4-1 Loss
-                            </h3>
-                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
-                        </div>
-                        
-
-<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
-                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
-                                Team Badge Placeholder
-                            </div>
-                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: NON-LEAGUE CUP</p>
-                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
-                                Five Talking Points from Boldmere St Michaels' Stoppage Time Drama
-                            </h3>
-                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
-                        </div>
-                    </div>
-                    
-                    <div class="text-center mt-8">
-                        <button class="bg-white text-dark-text font-semibold px-6 py-3 rounded-lg shadow-md border border-gray-300 hover:bg-gray-100 transition duration-150">
-                            Load More Match Reports
-                        </button>
-                    </div>
-
+                <!-- Match Reports Grid -->
+                <section id="match-reports-container" class="grid sm:grid-cols-2 gap-6 mb-8">
+                    <!-- Reports will be inserted here by JavaScript -->
+                    <p class="text-gray-500 col-span-2">Loading reports...</p>
                 </section>
-                
-                
 
-<section class="mt-8">
-                    <div id="new-report-card" class="new-report-card bg-white p-6 rounded-xl shadow-lg border-2 border-dashed border-primary-green text-center text-primary-green">
-                        <div class="flex items-center justify-center space-x-3">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                <!-- Load More Button (Simulated) -->
+                <div class="text-center mb-10">
+                    <button class="px-6 py-3 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition duration-150">
+                        Load More Match Reports
+                    </button>
+                </div>
+                
+                <!-- Publisher-Only: Create New Report Button -->
+                <section id="create-report-container" class="hidden text-center mb-10">
+                    <button id="create-report-button" class="w-full max-w-xl py-4 border-2 border-dashed border-color-accent text-color-accent rounded-xl hover:bg-green-50 transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-color-accent">
+                        <span class="flex items-center justify-center text-lg font-semibold">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                             </svg>
-                            <h2 class="text-xl font-bold">Create New Report (Match or Investigation)</h2>
-                        </div>
-                        <p class="text-sm mt-1 text-gray-600">Click here to write and publish your next article to the front page.</p>
-                    </div>
+                            Create New Report (Match or Investigation)
+                        </span>
+                        <p class="text-sm font-normal mt-1">Click here to enter and publish your next article to the front page.</p>
+                    </button>
                 </section>
 
             </div>
 
-            
-
-<div class="lg:col-span-1 mt-12 lg:mt-0 space-y-8">
+            <!-- Sidebar Column -->
+            <div class="lg:col-span-1">
                 
-                
-
-<div class="bg-primary-green p-6 rounded-xl shadow-xl text-white">
-                    <h3 class="text-xl font-bold mb-3">Grassroots Investigations</h3>
-                    <p class="text-sm opacity-90 mb-4">
-                        Deep dives into the urgent financial, ethical, and structural issues surrounding grassroots football development in the Midlands.
-                    </p>
-                    <button class="bg-white text-primary-green font-bold px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition duration-150">
+                <!-- Investigations Widget -->
+                <div class="sidebar-widget bg-color-accent text-white card-shadow">
+                    <h4 class="text-lg font-bold mb-2">Grassroots Investigations</h4>
+                    <p class="text-sm mb-4 opacity-90">Deep dives into the urgent financial, ethical, and structural issues surrounding U18 and U16 football development in the Midlands.</p>
+                    <a href="#" class="inline-block px-4 py-2 text-sm font-semibold bg-white text-color-accent rounded-full hover:bg-gray-100 transition duration-150">
                         Read All Investigative Reports
-                    </button>
+                    </a>
                 </div>
 
-                
-
-<div class="bg-white p-6 rounded-xl shadow-xl border-t-4 border-gray-300">
-                    <h3 class="text-xl font-bold text-dark-text mb-3">About The Reporter</h3>
-                    <p class="text-gray-600 text-sm mb-4">
-                        [Your Name] covers the non-league scene, providing match-day insight and the crucial issues affecting the future of youth development.
+                <!-- About Reporter Widget -->
+                <div class="sidebar-widget bg-white border border-gray-200 card-shadow">
+                    <h4 class="text-lg font-bold text-gray-800 mb-2">About The Reporter</h4>
+                    <p class="text-sm text-gray-600 mb-4">
+                        [Your Name] covers the non-league scene, providing matchday insight and the crucial stories affecting the future of youth development.
                     </p>
-                    <a href="#" class="text-sm text-primary-green font-medium hover:underline flex items-center">
-                        Get in touch for Pitches & Tips &rarr;
+                    <a href="#" class="text-sm font-medium text-color-accent hover:underline">
+                        Get in touch for Pitches & Tips →
                     </a>
                 </div>
 
@@ -400,76 +205,298 @@
         </div>
     </main>
 
-    
-
-<footer class="bg-dark-footer text-white py-12 mt-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <h4 class="text-2xl font-bold mb-2">THE GRASSROOTS POST</h4>
-            <p class="text-sm text-gray-400 mb-6">
-                © 2024 Independent Football Journalism for the Midlands.
-            </p>
-            <div class="flex justify-center space-x-6 text-sm font-medium">
-                <a href="#" class="text-gray-300 hover:text-primary-green transition duration-150">Our Mission</a>
-                <a href="#" class="text-gray-300 hover:text-primary-green transition duration-150">Pitches</a>
-                <a href="#" class="text-gray-300 hover:text-primary-green transition duration-150">Archive</a>
-            </div>
+    <!-- Footer -->
+    <footer class="color-primary-dark py-10 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-white">
+            <p class="text-xl font-extrabold mb-2 tracking-tight">THE GRASSROOTS POST</p>
+            <p class="text-xs mb-4 opacity-70">© 2024 Independent Football Journalism for the Midlands.</p>
+            <nav class="flex justify-center space-x-6 text-sm">
+                <a href="#" class="opacity-80 hover:opacity-100 transition duration-150">Our Mission</a>
+                <a href="#" class="opacity-80 hover:opacity-100 transition duration-150">Pitches</a>
+                <a href="#" class="opacity-80 hover:opacity-100 transition duration-150">Archive</a>
+            </nav>
         </div>
     </footer>
-
     
-
-<div id="new-report-modal" class="modal-overlay">
-        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-2xl w-full mx-4 relative overflow-y-auto max-h-[90vh]">
-            
-            <div class="flex justify-between items-center border-b pb-3 mb-4">
-                <h2 class="text-2xl font-bold text-dark-text">Submit New Report</h2>
-                <button id="close-modal-btn" class="text-gray-500 hover:text-gray-700 transition">
+    <!-- Publisher-Only Article Editor Modal (Hidden by default) -->
+    <div id="editor-modal" class="fixed inset-0 bg-gray-900 bg-opacity-70 hidden flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-4xl h-[90vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center p-4 border-b">
+                <h2 class="text-xl font-bold text-gray-800">New Article Editor</h2>
+                <button id="close-editor" class="text-gray-400 hover:text-gray-600 transition duration-150 p-2 rounded-full hover:bg-gray-100">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </button>
             </div>
-
-            <form id="post-form" class="space-y-4">
-                
-                <div>
-                    <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                    <input type="text" id="title" name="title" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3">
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label for="type" class="block text-sm font-medium text-gray-700 mb-1">Type of Content</label>
-                        <select id="type" name="type" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3">
-                            <option value="MATCH_REPORT">Match Report</option>
-                            <option value="INVESTIGATION">Investigation</option>
-                        </select>
+            
+            <!-- Modal Body (Form) -->
+            <div class="p-6 overflow-y-auto flex-grow">
+                <form id="article-form">
+                    
+                    <div class="mb-4">
+                        <label for="article-title" class="block text-sm font-medium text-gray-700 mb-1">Article Title (Max 80 chars)</label>
+                        <input type="text" id="article-title" name="article-title" required maxlength="80" 
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent text-lg font-semibold">
                     </div>
-                    <div>
-                        <label for="category" class="block text-sm font-medium text-gray-700 mb-1">Category / League</label>
-                        <select id="category" name="category" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3">
-                            <option value="MIDLANDS LEAGUE">Midlands League</option>
-                            <option value="RESERVES">Reserves</option>
-                            <option value="ACADEMY FIXTURE">Academy Fixture</option>
-                            <option value="NON-LEAGUE CUP">Non-League Cup</option>
-                        </select>
+
+                    <div class="mb-4 grid grid-cols-2 gap-4">
+                         <div>
+                            <label for="article-type" class="block text-sm font-medium text-gray-700 mb-1">Article Type (e.g., Midlands League, Investigation)</label>
+                            <input type="text" id="article-type" name="article-type" required 
+                                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent">
+                        </div>
+                        <div>
+                            <label for="article-badge-url" class="block text-sm font-medium text-gray-700 mb-1">Badge/Image URL (Optional)</label>
+                            <input type="url" id="article-badge-url" name="article-badge-url" placeholder="https://placehold.co/120x120/..."
+                                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent">
+                        </div>
                     </div>
-                </div>
 
-                <div>
-                    <label for="content" class="block text-sm font-medium text-gray-700 mb-1">Report Content (Full Text)</label>
-                    <textarea id="content" name="content" rows="10" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3"></textarea>
-                </div>
+                    <div class="mb-6">
+                        <label for="article-content" class="block text-sm font-medium text-gray-700 mb-1">Full Article Content (Markdown Supported)</label>
+                        <textarea id="article-content" name="article-content" required rows="15" 
+                                  placeholder="Start writing your match report or investigation here. Note: You can use basic Markdown for formatting."
+                                  class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent text-base"></textarea>
+                    </div>
+                </form>
                 
-                <p id="modal-message" class="text-sm text-red-500"></p>
-
-                <button type="submit" id="submit-button" class="w-full bg-primary-green text-white font-bold py-3 rounded-lg hover:bg-green-700 transition duration-150 shadow-md">
-                    Submit Report
+                <!-- Notification Area -->
+                <div id="editor-message" class="text-sm font-medium p-3 rounded-lg hidden"></div>
+                
+            </div>
+            
+            <!-- Modal Footer (Actions) -->
+            <div class="p-4 border-t flex justify-end space-x-4">
+                <button type="button" id="publish-button" class="px-6 py-2 bg-color-accent text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150">
+                    Publish Article
                 </button>
-            </form>
+            </div>
         </div>
     </div>
 
+    <!-- Main Application Logic (Using Firebase) -->
+    <script type="module">
+        // Global variables for Firebase services and user ID
+        let db, auth, appId;
+        let userId = null;
+        let publisherId = null; 
+
+        // --- Configuration ---
+        const initialReports = [
+            { id: 'report1', type: 'Midlands League', title: 'South Birmingham United Grind Out a Desperate 1-0 Win Over Lye Town', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' },
+            { id: 'report2', type: 'Reserves', title: 'Westside Reserves Show Flashes of Brilliance in 3-3 Thriller', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' },
+            { id: 'report3', type: 'Academy Fixture', title: 'Lichfield City\'s Midfield Overrun: Defensive Concerns After 4-1 Loss', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' },
+            { id: 'report4', type: 'Non-League Cup', title: 'Five Talking Points from Boldmere St Michaels\' Stoppage Time Drama', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' }
+        ];
+
+        // --- Utility Functions ---
+
+        /**
+         * Generates the collection path for public data.
+         */
+        function getReportsCollectionPath() {
+            return `artifacts/${appId}/public/data/reports`;
+        }
+        
+        /**
+         * Clears the editor form and hides the modal.
+         */
+        function closeEditor() {
+            document.getElementById('editor-modal').classList.add('hidden');
+            document.getElementById('article-form').reset();
+            const msg = document.getElementById('editor-message');
+            msg.classList.add('hidden');
+            msg.innerText = '';
+        }
+        
+        /**
+         * Displays a temporary message in the editor modal.
+         */
+        function showMessage(text, isError = false) {
+            const msg = document.getElementById('editor-message');
+            msg.innerText = text;
+            msg.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800');
+            if (isError) {
+                msg.classList.add('bg-red-100', 'text-red-800');
+            } else {
+                msg.classList.add('bg-green-100', 'text-green-800');
+            }
+        }
+
+        /**
+         * Renders a single report card HTML.
+         */
+        function createReportCard(report) {
+            // Fallback for badge URL if not provided
+            const badgeUrl = report.badge && report.badge.trim() !== ''
+                ? report.badge
+                : 'https://placehold.co/120x120/E0E7FF/172554?text=Badge';
+
+            return `
+                <div class="bg-white rounded-xl overflow-hidden border border-gray-200 card-shadow hover:shadow-lg transition duration-200">
+                    <div class="bg-gray-100 h-32 flex items-center justify-center">
+                        <img src="${badgeUrl}" alt="Team Badge Placeholder" class="max-h-full max-w-full object-contain p-4" onerror="this.onerror=null; this.src='https://placehold.co/120x120/E0E7FF/172554?text=Badge'">
+                    </div>
+                    <div class="p-4">
+                        <p class="text-xs font-bold tracking-wider text-red-500 uppercase mb-1">REPORT: ${report.type}</p>
+                        <h4 class="text-lg font-semibold text-gray-900 mb-2 leading-tight">${report.title}</h4>
+                        <a href="#" class="text-sm font-medium text-color-primary hover:underline transition duration-150">
+                            Read the Full Report →
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+
+        /**
+         * Saves a new article to Firestore.
+         */
+        async function saveArticle(event) {
+            event.preventDefault();
+            
+            const titleInput = document.getElementById('article-title');
+            const typeInput = document.getElementById('article-type');
+            const badgeInput = document.getElementById('article-badge-url');
+            const contentInput = document.getElementById('article-content');
+
+            // Basic validation
+            if (!titleInput.value || !typeInput.value || !contentInput.value) {
+                showMessage('Please fill out the Title, Type, and Content fields.', true);
+                return;
+            }
+            
+            const publishButton = document.getElementById('publish-button');
+            publishButton.disabled = true;
+            publishButton.innerText = 'Publishing...';
+
+            const newArticle = {
+                title: titleInput.value.trim(),
+                type: typeInput.value.trim(),
+                badge: badgeInput.value.trim(),
+                // Store the raw text/markdown in the content field.
+                content: contentInput.value.trim(), 
+                timestamp: Date.now(), // For sorting
+                authorId: userId,
+            };
+
+            try {
+                // Use the timestamp as the document ID for simple unique ID generation
+                await setDoc(doc(db, getReportsCollectionPath(), newArticle.timestamp.toString()), newArticle);
+                showMessage('Article successfully published and is live on the front page!', false);
+                
+                // Wait briefly then close the editor
+                setTimeout(closeEditor, 2000); 
+
+            } catch (error) {
+                console.error("Error publishing article: ", error);
+                showMessage(`Publishing Failed: ${error.message}`, true);
+            } finally {
+                publishButton.disabled = false;
+                publishButton.innerText = 'Publish Article';
+            }
+        }
+
+        /**
+         * Main function to load content from Firestore and manage the UI.
+         */
+        async function loadReports(currentUserId) {
+            const container = document.getElementById('match-reports-container');
+            const createReportContainer = document.getElementById('create-report-container');
+
+            if (!db || !currentUserId) {
+                container.innerHTML = `<p class="text-red-500 col-span-2">Database not ready or user not authenticated.</p>`;
+                createReportContainer.classList.add('hidden');
+                return;
+            }
+
+            // --- Access Control Fix: Show/Hide Create Report Button ---
+            // Set the publisherId to the ID of the user who signed in initially (this works for the Canvas environment)
+            if (!publisherId) {
+                publisherId = currentUserId; 
+                document.getElementById('user-info-display').innerText = `User ID: ${currentUserId} (You are the Publisher)`;
+            }
+
+            if (currentUserId === publisherId) {
+                createReportContainer.classList.remove('hidden');
+                console.log("Publisher detected. 'Create Report' button is visible.");
+            } else {
+                createReportContainer.classList.add('hidden');
+                document.getElementById('user-info-display').innerText = `User ID: ${currentUserId}`;
+                console.log("Non-Publisher detected. 'Create Report' button is hidden.");
+            }
+
+            // --- Set up Firestore Listener ---
+            const reportsRef = collection(db, getReportsCollectionPath());
+            const q = query(reportsRef, orderBy("timestamp", "desc"), limit(6));
+
+            onSnapshot(q, (snapshot) => {
+                let reportsHtml = '';
+                let hasReports = false;
+
+                snapshot.forEach((doc) => {
+                    hasReports = true;
+                    const report = doc.data();
+                    reportsHtml += createReportCard(report);
+                });
+
+                if (hasReports) {
+                    container.innerHTML = reportsHtml;
+                } else {
+                    // Fallback to initial dummy data if Firestore is empty
+                    container.innerHTML = initialReports.map(createReportCard).join('');
+                    console.log("Firestore empty, displaying placeholder reports.");
+                }
+            }, (error) => {
+                console.error("Error listening to reports:", error);
+                container.innerHTML = `<p class="text-red-500 col-span-2">Error loading reports. Check console for details.</p>`;
+            });
+        }
+        
+        // --- Initialization ---
+
+        // 1. Wait for the imported functions and global objects to be set
+        window.addEventListener('load', () => {
+            db = window.db;
+            auth = window.auth;
+            appId = window.appId;
+
+            // 2. Set up the Authentication Listener
+            window.setupAuthListener(async (currentUserId) => {
+                userId = currentUserId;
+
+                if (userId) {
+                    // This is where the core logic is now called
+                    await loadReports(userId);
+                }
+            });
+
+            // 3. Start the Firebase Auth process
+            window.setupFirebaseAndLoadContent();
+
+            // 4. Attach Editor Button Handlers (Only runs if the user is the publisher)
+            const createButton = document.getElementById('create-report-button');
+            const closeButton = document.getElementById('close-editor');
+            const publishButton = document.getElementById('publish-button');
+            const editorModal = document.getElementById('editor-modal');
+
+            if (createButton) {
+                createButton.addEventListener('click', () => {
+                    // Show the editor modal
+                    editorModal.classList.remove('hidden');
+                });
+            }
+
+            if (closeButton) {
+                closeButton.addEventListener('click', closeEditor);
+            }
+            
+            if (publishButton) {
+                publishButton.addEventListener('click', saveArticle);
+            }
+        });
+    </script>
 </body>
 </html>
 
