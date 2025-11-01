@@ -3,207 +3,396 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Grassroots Post | Midlands Football & Youth Analysis</title>
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Configure Font and custom colors -->
+    <title>THE GRASSROOTS POST</title>
+    
+
+<script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900;500&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: {
-                        // Using a single, clean, highly-readable font family (Inter)
-                        sans: ['Inter', 'system-ui', 'sans-serif'],
-                    },
                     colors: {
-                        // The primary brand color: a strong, professional navy/slate
-                        'primary-dark': '#1E293B', 
-                        // A secondary color for clean links and accents
-                        'link-blue': '#0F766E', // A professional teal/dark cyan
-                        // Clean white/off-white background
-                        'background': '#F8FAFC', 
-                        // A subtle red for 'Match Day' labels
-                        'category-red': '#B91C1C', 
-                        // A darker green for 'Youth Focus'
-                        'category-green': '#059669', 
-                        // Light gray for borders and separators
-                        'border-light': '#E2E8F0',
-                    }
+                        'primary-green': '#38A169', // A vibrant green for accents
+                        'dark-green-header': '#1A6044', // Darker green for the top bar
+                        'dark-text': '#1A202C',
+                        'light-bg': '#F7FAFC',
+                        'dark-footer': '#2D3748',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
                 }
             }
         }
     </script>
     <style>
-        html { scroll-behavior: smooth; }
-        /* Subtle shadow for professional depth, not the aggressive shadow of the previous version */
-        .card-shadow { box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03); }
-        .card-shadow:hover { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -4px rgba(0, 0, 0, 0.05); }
-        
-        /* Mobile adjustment for display font */
+        .header-title {
+            font-size: 3.5rem;
+            line-height: 1.1;
+        }
         @media (max-width: 640px) {
-            .text-5xl-mobile {
-                font-size: 2.5rem; /* Reduce size on small screens */
+             .header-title {
+                font-size: 2.5rem;
             }
+        }
+        /* Modal Backdrop */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            /* Hidden by default */
+            display: none; 
+        }
+        /* Make modal active when shown */
+        .modal-overlay.active {
+            display: flex;
+        }
+        /* Style for the new report button section */
+        .new-report-card {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .new-report-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(56, 161, 105, 0.1), 0 4px 6px -2px rgba(56, 161, 105, 0.05);
         }
     </style>
 </head>
+<body class="bg-light-bg font-sans text-dark-text">
 
-<body class="bg-background font-sans text-primary-dark antialiased">
+    
 
-    <!-- Header & Navigation (Clean, Minimalist Bar) -->
-    <header class="sticky top-0 z-50 bg-white shadow-md border-t-4 border-link-blue">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center">
-            <!-- Logo/Title -->
-            <a href="#hero" class="text-2xl font-extrabold text-primary-dark tracking-tight">
-                THE GRASSROOTS POST
-            </a>
-            <!-- Desktop Navigation -->
-            <nav class="hidden md:flex space-x-6">
-                <a href="#reports" class="text-sm text-gray-700 hover:text-link-blue transition duration-200 font-semibold tracking-wide">MATCH REPORTS</a>
-                <a href="#investigations" class="text-sm text-gray-700 hover:text-link-blue transition duration-200 font-semibold tracking-wide">GRASSROOTS INVESTIGATIONS</a>
-                <a href="#contact" class="text-sm text-gray-700 hover:text-link-blue transition duration-200 font-semibold tracking-wide">CONTACT</a>
-            </nav>
-            <!-- Mobile Menu Button -->
-            <button id="mobile-menu-button" class="md:hidden text-primary-dark hover:text-link-blue focus:outline-none">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
-            </button>
+<script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            query, 
+            where, 
+            orderBy, 
+            limit, 
+            onSnapshot, 
+            setLogLevel 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global state for Firebase (MANDATORY for modal submission)
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth, userId = null;
+        let isAuthReady = false;
+
+        // Function to get the correct Firestore collection path
+        const getPostsCollectionRef = (dbInstance, currentUserId) => {
+            // Private user data path: /artifacts/{appId}/users/{userId}/posts
+            return collection(dbInstance, `artifacts/${appId}/users/${currentUserId}/posts`);
+        };
+
+        // Helper to format date
+        const formatDate = (timestamp) => {
+            if (!timestamp) return 'Unknown Date';
+            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        };
+
+        // --- Firebase Initialization and Auth ---
+
+        const initFirebase = () => {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Set Firestore log level for debugging
+                setLogLevel('Debug');
+                
+                // Sign in logic
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
+                        // We will NOT call fetchAndRenderPosts() here, to keep static content.
+                        // However, the modal submission will still work.
+                    } else {
+                        // Attempt to sign in using the custom token or anonymously
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (error) {
+                            console.error("Firebase Auth Error:", error);
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase Initialization Failed:", error);
+                document.getElementById('user-id-display').textContent = `Firebase Error: Check console.`;
+            }
+        };
+
+        // --- Post Submission Logic ---
+        
+        const submitPost = async (event) => {
+            event.preventDefault();
+            
+            if (!db || !userId) {
+                // Display error in modal, not just console
+                document.getElementById('modal-message').textContent = 'Database connection not ready. Ensure Firebase config is set up. Try again in a moment.';
+                console.error("Database connection or User ID not ready for submission.");
+                return;
+            }
+
+            const form = event.target;
+            const post = {
+                title: form.title.value,
+                type: form.type.value,
+                category: form.type.value === 'MATCH_REPORT' ? form.category.value : 'General Investigation',
+                content: form.content.value,
+                timestamp: new Date(),
+                userId: userId
+            };
+
+            const postsRef = getPostsCollectionRef(db, userId);
+
+            try {
+                const submitButton = document.getElementById('submit-button');
+                submitButton.disabled = true;
+                submitButton.textContent = 'Saving...';
+                await addDoc(postsRef, post);
+                form.reset();
+                hideModal();
+                alert("Report successfully submitted! It will appear when dynamic content is enabled."); // User feedback
+                console.log("Post successfully saved to Firebase.");
+            } catch (error) {
+                console.error("Error adding document: ", error);
+                document.getElementById('modal-message').textContent = 'Error saving post. Check console for details and Firebase setup.';
+            } finally {
+                const submitButton = document.getElementById('submit-button');
+                submitButton.disabled = false;
+                submitButton.textContent = 'Submit Report';
+            }
+        };
+
+        // --- Modal Control Logic ---
+        const modal = document.getElementById('new-report-modal');
+
+        const showModal = () => {
+            modal.classList.add('active');
+        }
+
+        const hideModal = () => {
+            document.getElementById('post-form').reset();
+            document.getElementById('modal-message').textContent = '';
+            modal.classList.remove('active');
+        }
+
+        // Attach event listeners after the DOM is loaded
+        window.onload = () => {
+            initFirebase();
+            
+            document.getElementById('new-report-card').addEventListener('click', showModal); 
+            document.getElementById('close-modal-btn').addEventListener('click', hideModal);
+            document.getElementById('post-form').addEventListener('submit', submitPost);
+        };
+    </script>
+
+
+    
+    <!-- New Top Bar -->
+    <div class="bg-dark-green-header h-2"></div>
+
+    <nav class="bg-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                
+
+<div class="flex-shrink-0">
+                    <span class="text-xl font-extrabold text-dark-text tracking-wider">THE GRASSROOTS POST</span>
+                </div>
+                
+
+<div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                    <a href="#" class="text-dark-text hover:text-primary-green transition duration-150 ease-in-out px-3 py-2 text-sm font-semibold">MATCH REPORTS</a>
+                    <a href="#" class="text-dark-text hover:text-primary-green transition duration-150 ease-in-out px-3 py-2 text-sm font-semibold">GRASSROOTS INVESTIGATIONS</a>
+                    <a href="#" class="text-dark-text hover:text-primary-green transition duration-150 ease-in-out px-3 py-2 text-sm font-semibold">CONTACT</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    
+
+<header class="py-12 bg-white border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="header-title font-extrabold text-dark-text">
+                THE GRASSROOTS GAME
+            </h1>
+            <p class="text-xl text-gray-600 mt-2">
+                Unrivaled match reporting and deep investigative features on youth football in Birmingham and the Midlands.
+            </p>
+             <p id="user-id-display" class="text-xs text-gray-400 mt-4">User ID: Loading...</p>
         </div>
     </header>
 
-    <!-- Mobile Menu (Hidden by default) -->
-    <div id="mobile-menu" class="hidden md:hidden bg-white shadow-lg fixed inset-x-0 top-[56px] z-40 p-4 border-t border-border-light">
-        <a href="#reports" class="block py-2 text-base text-primary-dark hover:bg-gray-100 rounded-md px-2 font-semibold">MATCH REPORTS</a>
-        <a href="#investigations" class="block py-2 text-base text-primary-dark hover:bg-gray-100 rounded-md px-2 font-semibold">GRASSROOTS INVESTIGATIONS</a>
-        <a href="#contact" class="block py-2 text-base text-primary-dark hover:bg-gray-100 rounded-md px-2 font-semibold">CONTACT</a>
-    </div>
+    
 
-    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <!-- 1. Hero/Featured Investigative Report -->
-        <section id="hero" class="py-10 md:py-14 border-b border-border-light mb-8">
-            <h1 class="text-5xl sm:text-6xl font-extrabold text-primary-dark mb-2 text-5xl-mobile tracking-tight">
-                THE GRASSROOTS GAME
-            </h1>
-            <p class="text-lg text-gray-500 max-w-4xl">
-                Unrivaled match reporting and deep investigative features on youth football in Birmingham and the Midlands.
-            </p>
-        </section>
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+        <div class="lg:grid lg:grid-cols-3 lg:gap-8">
 
-        <!-- 2. Main Content Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
             
-            <!-- LEFT COLUMN (Main Feature and Youth Focus) - Now takes up full width on mobile/tablet -->
-            <div class="md:col-span-2 space-y-10">
+
+<div class="lg:col-span-2 space-y-12">
+
                 
-                <!-- FEATURED INVESTIGATIVE ARTICLE (Youth Focus - Large Card) -->
-                <a href="#" class="block bg-white rounded-xl border border-border-light overflow-hidden shadow-lg card-shadow transition duration-300">
-                    <!-- Placeholder Image/Visual Block (Clean Gray) -->
-                    <div class="h-64 bg-gray-100 flex items-center justify-center">
-                        <span class="text-gray-400 font-medium">VISUAL: Youth Team Action Placeholder</span>
-                    </div>
-                    <div class="p-6">
-                        <!-- Category Tag uses the new name/ID: GRASSROOTS INVESTIGATIONS -->
-                        <span class="text-xs font-bold uppercase tracking-widest text-category-green bg-category-green/10 px-3 py-1 rounded-full">INVESTIGATION</span>
-                        <h2 class="text-3xl font-bold text-primary-dark mt-3 mb-3 leading-tight hover:text-link-blue transition duration-200">
-                            The Price of Potential: How Pitch Fees Are Squeezing Birmingham's Talent Pipeline
-                        </h2>
-                        <p class="text-gray-600 mb-4">
-                            An investigation into the rising costs of local facilities and the systemic barriers preventing low-income families from keeping kids in the game.
-                        </p>
-                        <span class="text-sm text-gray-400">Published Today by [Your Name]</span>
-                    </div>
-                </a>
 
-                <h3 class="text-2xl font-bold text-primary-dark border-b border-border-light pb-2 pt-4" id="reports">Latest Match Reports</h3>
+<section class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-primary-green">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        
 
-                <!-- GRID OF MATCH REPORT CARDS -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    
-                    <!-- Match Report 1 -->
-                    <a href="#" class="block bg-white border border-border-light rounded-lg overflow-hidden card-shadow transition duration-300">
-                        <div class="h-32 bg-gray-100 flex items-center justify-center">
-                            <span class="text-gray-400 text-sm">Team Badge Placeholder</span>
+<div class="md:col-span-2 bg-gray-200 rounded-lg h-64 flex items-center justify-center text-gray-500 font-medium">
+                            VISUAL: Youth Team Action Placeholder
                         </div>
-                        <div class="p-4">
-                            <span class="text-xs font-bold uppercase tracking-wider text-category-red">REPORT: MIDLANDS LEAGUE</span>
-                            <p class="text-lg font-semibold text-primary-dark mt-1 mb-2 leading-snug hover:text-link-blue transition duration-200">
+                        
+
+<div class="md:col-span-1 flex flex-col justify-between">
+                            <div>
+                                <p class="text-sm font-bold text-primary-green uppercase tracking-wider mb-2">INVESTIGATION</p>
+                                <h2 class="text-2xl font-extrabold text-dark-text mb-3 leading-snug">
+                                    The Price of Potential: How Pitch Fees Are Squeezing Birmingham's Talent Pipeline
+                                </h2>
+                                <p class="text-gray-600 text-sm mb-4 line-clamp-4">
+                                    An investigation into the rising costs of youth football, and the systemic barriers preventing low-income families from participating in the game.
+                                </p>
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Published Today by [Your Name]
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                
+                
+
+<section>
+                    <h2 class="text-3xl font-extrabold text-dark-text mb-6">Latest Match Reports</h2>
+                    
+                    
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        
+
+<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
+                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
+                                Team Badge Placeholder
+                            </div>
+                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: MIDLANDS LEAGUE</p>
+                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
                                 South Birmingham United Grind Out a Desperate 1-0 Win Over Lye Town
-                            </p>
-                            <span class="text-xs text-gray-500">Read the Full Report &rarr;</span>
+                            </h3>
+                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
                         </div>
-                    </a>
+                        
 
-                    <!-- Match Report 2 -->
-                    <a href="#" class="block bg-white border border-border-light rounded-lg overflow-hidden card-shadow transition duration-300">
-                        <div class="h-32 bg-gray-100 flex items-center justify-center">
-                            <span class="text-gray-400 text-sm">Team Badge Placeholder</span>
-                        </div>
-                        <div class="p-4">
-                            <span class="text-xs font-bold uppercase tracking-wider text-category-red">REPORT: RESERVES</span>
-                            <p class="text-lg font-semibold text-primary-dark mt-1 mb-2 leading-snug hover:text-link-blue transition duration-200">
+<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
+                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
+                                Team Badge Placeholder
+                            </div>
+                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: RESERVES</p>
+                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
                                 Westside Reserves Show Flashes of Brilliance in 3-3 Thriller
-                            </p>
-                            <span class="text-xs text-gray-500">Read the Full Report &rarr;</span>
+                            </h3>
+                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
                         </div>
-                    </a>
-                    
-                    <!-- Match Report 3 -->
-                    <a href="#" class="block bg-white border border-border-light rounded-lg overflow-hidden card-shadow transition duration-300">
-                        <div class="h-32 bg-gray-100 flex items-center justify-center">
-                            <span class="text-gray-400 text-sm">Team Badge Placeholder</span>
-                        </div>
-                        <div class="p-4">
-                            <span class="text-xs font-bold uppercase tracking-wider text-category-red">REPORT: ACADEMY FIXTURE</span>
-                            <p class="text-lg font-semibold text-primary-dark mt-1 mb-2 leading-snug hover:text-link-blue transition duration-200">
-                                Lichfield City's Midfield Overrun: Defensive Concerns After 4-1 Loss
-                            </p>
-                            <span class="text-xs text-gray-500">Read the Full Report &rarr;</span>
-                        </div>
-                    </a>
+                        
 
-                    <!-- Match Report 4 -->
-                    <a href="#" class="block bg-white border border-border-light rounded-lg overflow-hidden card-shadow transition duration-300">
-                        <div class="h-32 bg-gray-100 flex items-center justify-center">
-                            <span class="text-gray-400 text-sm">Team Badge Placeholder</span>
+<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
+                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
+                                Team Badge Placeholder
+                            </div>
+                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: ACADEMY FIXTURE</p>
+                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
+                                Lichfield City's Midfield Overrun: Defensive Concerns After 4-1 Loss
+                            </h3>
+                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
                         </div>
-                        <div class="p-4">
-                            <span class="text-xs font-bold uppercase tracking-wider text-category-red">REPORT: NON-LEAGUE CUP</span>
-                            <p class="text-lg font-semibold text-primary-dark mt-1 mb-2 leading-snug hover:text-link-blue transition duration-200">
+                        
+
+<div class="bg-white p-6 rounded-xl shadow-md border-t-2 border-gray-200 hover:shadow-lg transition duration-300">
+                            <div class="bg-gray-200 rounded-lg h-40 mb-4 flex items-center justify-center text-gray-500">
+                                Team Badge Placeholder
+                            </div>
+                            <p class="text-xs font-bold text-red-600 uppercase mb-1">REPORT: NON-LEAGUE CUP</p>
+                            <h3 class="text-xl font-semibold text-dark-text mb-2 leading-snug">
                                 Five Talking Points from Boldmere St Michaels' Stoppage Time Drama
-                            </p>
-                            <span class="text-xs text-gray-500">Read the Full Report &rarr;</span>
+                            </h3>
+                            <a href="#" class="text-sm text-primary-green font-medium hover:underline">Read the Full Report &rarr;</a>
                         </div>
-                    </a>
-                </div>
+                    </div>
+                    
+                    <div class="text-center mt-8">
+                        <button class="bg-white text-dark-text font-semibold px-6 py-3 rounded-lg shadow-md border border-gray-300 hover:bg-gray-100 transition duration-150">
+                            Load More Match Reports
+                        </button>
+                    </div>
+
+                </section>
                 
-                <div class="text-center pt-4">
-                    <button class="bg-white text-primary-dark font-semibold py-2 px-6 rounded-lg border border-border-light hover:bg-gray-100 transition duration-200 shadow-sm text-sm">
-                        Load More Match Reports
-                    </button>
-                </div>
+                
+
+<section class="mt-8">
+                    <div id="new-report-card" class="new-report-card bg-white p-6 rounded-xl shadow-lg border-2 border-dashed border-primary-green text-center text-primary-green">
+                        <div class="flex items-center justify-center space-x-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                            </svg>
+                            <h2 class="text-xl font-bold">Create New Report (Match or Investigation)</h2>
+                        </div>
+                        <p class="text-sm mt-1 text-gray-600">Click here to write and publish your next article to the front page.</p>
+                    </div>
+                </section>
+
             </div>
 
-            <!-- RIGHT COLUMN (Sidebar) -->
-            <div class="md:col-span-1 space-y-8">
+            
+
+<div class="lg:col-span-1 mt-12 lg:mt-0 space-y-8">
                 
-                <!-- GRASSROOTS INVESTIGATIONS BLOCK -->
-                <div class="bg-category-green p-6 rounded-xl shadow-lg text-white" id="investigations">
-                    <h3 class="text-xl font-bold mb-3 border-b border-white border-opacity-30 pb-2">Grassroots Investigations</h3>
-                    <p class="mb-4 text-sm font-light">
-                        Deep dives into the health, funding, and ethical issues surrounding U16 and U18 football development in the Midlands.
+                
+
+<div class="bg-primary-green p-6 rounded-xl shadow-xl text-white">
+                    <h3 class="text-xl font-bold mb-3">Grassroots Investigations</h3>
+                    <p class="text-sm opacity-90 mb-4">
+                        Deep dives into the urgent financial, ethical, and structural issues surrounding grassroots football development in the Midlands.
                     </p>
-                    <a href="#" class="block bg-white text-category-green text-center font-bold py-3 rounded-lg hover:bg-gray-100 transition duration-200 text-sm tracking-wide">
+                    <button class="bg-white text-primary-green font-bold px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition duration-150">
                         Read All Investigative Reports
-                    </a>
+                    </button>
                 </div>
 
-                <!-- Contact/Bio Block -->
-                <div class="bg-white p-6 rounded-xl border border-border-light shadow-sm" id="contact">
-                    <h3 class="text-xl font-bold mb-3">About The Reporter</h3>
-                    <p class="text-gray-600 text-sm">
-                        [Your Name] covers the non-league scene across the Midlands, focusing on match-day breakdowns and the crucial issues affecting the future of youth development.
+                
+
+<div class="bg-white p-6 rounded-xl shadow-xl border-t-4 border-gray-300">
+                    <h3 class="text-xl font-bold text-dark-text mb-3">About The Reporter</h3>
+                    <p class="text-gray-600 text-sm mb-4">
+                        [Your Name] covers the non-league scene, providing match-day insight and the crucial issues affecting the future of youth development.
                     </p>
-                    <a href="#" class="text-link-blue hover:text-teal-700 font-semibold mt-4 block text-sm">
-                        Get in Touch for Pitches & Tips &rarr;
+                    <a href="#" class="text-sm text-primary-green font-medium hover:underline flex items-center">
+                        Get in touch for Pitches & Tips &rarr;
                     </a>
                 </div>
 
@@ -211,33 +400,76 @@
         </div>
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-primary-dark text-gray-400 py-8 mt-12 border-t-4 border-link-blue">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm">
-            <p class="text-lg font-bold text-white mb-3">THE GRASSROOTS POST</p>
-            <p>&copy; 2024 Independent Football Journalism for the Midlands.</p>
-            <div class="mt-4 space-x-4">
-                <a href="#" class="hover:text-white transition duration-200">Our Mission</a>
-                <span class="text-gray-700">|</span>
-                <a href="#" class="hover:text-white transition duration-200">Pitches</a>
-                <span class="text-gray-700">|</span>
-                <a href="#" class="hover:text-white transition duration-200">Archive</a>
+    
+
+<footer class="bg-dark-footer text-white py-12 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h4 class="text-2xl font-bold mb-2">THE GRASSROOTS POST</h4>
+            <p class="text-sm text-gray-400 mb-6">
+                © 2024 Independent Football Journalism for the Midlands.
+            </p>
+            <div class="flex justify-center space-x-6 text-sm font-medium">
+                <a href="#" class="text-gray-300 hover:text-primary-green transition duration-150">Our Mission</a>
+                <a href="#" class="text-gray-300 hover:text-primary-green transition duration-150">Pitches</a>
+                <a href="#" class="text-gray-300 hover:text-primary-green transition duration-150">Archive</a>
             </div>
         </div>
     </footer>
 
-    <!-- JavaScript for Mobile Menu Toggle and Link Closing -->
-    <script>
-        document.getElementById('mobile-menu-button').addEventListener('click', function() {
-            const menu = document.getElementById('mobile-menu');
-            menu.classList.toggle('hidden');
-        });
-        // Close menu when a link is clicked
-        document.querySelectorAll('#mobile-menu a').forEach(link => {
-            link.addEventListener('click', () => {
-                document.getElementById('mobile-menu').classList.add('hidden');
-            });
-        });
-    </script>
+    
+
+<div id="new-report-modal" class="modal-overlay">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-2xl w-full mx-4 relative overflow-y-auto max-h-[90vh]">
+            
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h2 class="text-2xl font-bold text-dark-text">Submit New Report</h2>
+                <button id="close-modal-btn" class="text-gray-500 hover:text-gray-700 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <form id="post-form" class="space-y-4">
+                
+                <div>
+                    <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                    <input type="text" id="title" name="title" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="type" class="block text-sm font-medium text-gray-700 mb-1">Type of Content</label>
+                        <select id="type" name="type" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3">
+                            <option value="MATCH_REPORT">Match Report</option>
+                            <option value="INVESTIGATION">Investigation</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="category" class="block text-sm font-medium text-gray-700 mb-1">Category / League</label>
+                        <select id="category" name="category" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3">
+                            <option value="MIDLANDS LEAGUE">Midlands League</option>
+                            <option value="RESERVES">Reserves</option>
+                            <option value="ACADEMY FIXTURE">Academy Fixture</option>
+                            <option value="NON-LEAGUE CUP">Non-League Cup</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="content" class="block text-sm font-medium text-gray-700 mb-1">Report Content (Full Text)</label>
+                    <textarea id="content" name="content" rows="10" required class="w-full border-gray-300 rounded-lg shadow-sm focus:border-primary-green focus:ring-primary-green p-3"></textarea>
+                </div>
+                
+                <p id="modal-message" class="text-sm text-red-500"></p>
+
+                <button type="submit" id="submit-button" class="w-full bg-primary-green text-white font-bold py-3 rounded-lg hover:bg-green-700 transition duration-150 shadow-md">
+                    Submit Report
+                </button>
+            </form>
+        </div>
+    </div>
+
 </body>
 </html>
+
