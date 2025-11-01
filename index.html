@@ -1,502 +1,709 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Grassroots Post - Unrivaled Match Reporting</title>
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Use Inter font -->
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f7f7;
-        }
-        /* Custom colors based on the design */
-        .color-primary-dark { background-color: #172554; } /* Navy/Dark Blue for Footer */
-        .color-primary-light { background-color: #E0E7FF; } /* Very Light Blue */
-        .color-accent { background-color: #059669; } /* Emerald Green */
-        .text-color-primary { color: #172554; }
-        .text-color-accent { color: #059669; }
-        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
-        
-        /* Utility classes for responsive design */
-        .sidebar-widget {
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1.5rem;
-        }
-        /* Style for the full-screen modal/editor */
-        #editor-modal {
-            z-index: 50; /* Above everything else */
-            backdrop-filter: blur(5px);
-            -webkit-backdrop-filter: blur(5px);
-        }
-    </style>
-</head>
-<body>
+import React, { useState, useEffect, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, doc, collection, query, orderBy, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, serverTimestamp 
+} from 'firebase/firestore';
+import { 
+    Home, Lock, CheckCircle, PenTool, Loader, XCircle, Info, Trash2, ShieldCheck, User, Plus 
+} from 'lucide-react';
 
-    <!-- Firebase SDKs (MUST be included before any custom script) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, query, limit, onSnapshot, orderBy, setDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+// --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+    apiKey: "YOUR_FIREBASE_API_KEY",
+    authDomain: "YOUR_FIREBASE_AUTH_DOMAIN",
+    projectId: "YOUR_FIREBASE_PROJECT_ID",
+    storageBucket: "YOUR_FIREBASE_STORAGE_BUCKET",
+    messagingSenderId: "YOUR_FIREBASE_MESSAGING_SENDER_ID",
+    appId: "YOUR_FIREBASE_APP_ID"
+};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // IMPORTANT: Use the global variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// --- UTILITY: Firebase Initialization and Setup ---
+let app, db, auth;
 
-        setLogLevel('Debug'); // Enable Firestore logging
+try {
+  app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+  auth = getAuth(app);
+} catch (error) {
+  console.error("Firebase initialization failed:", error);
+}
 
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        
-        // Expose to global scope for use in the HTML script block
-        window.db = db;
-        window.auth = auth;
-        window.appId = appId;
-        window.initialAuthToken = initialAuthToken;
-        window.onAuthStateChanged = onAuthStateChanged;
-        window.signInAnonymously = signInAnonymously;
-        window.signInWithCustomToken = signInWithCustomToken;
-        window.onSnapshot = onSnapshot;
-        window.collection = collection;
-        window.query = query;
-        window.limit = limit;
-        window.orderBy = orderBy;
-        window.doc = doc;
-        window.setDoc = setDoc;
+// --- CONSTANTS ---
+const ADMIN_PASSWORD = 'Moab1212L';
+const ADMIN_USER_ID = 'UID_TO_BE_REPLACED'; // This is a placeholder; the app uses the entered ID
 
-        // Start Auth process and then load data
-        window.setupFirebaseAndLoadContent = async () => {
-            try {
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-                
-                // Once authenticated, the auth state listener will trigger loadContent
-            } catch (error) {
-                console.error("Firebase Auth Error:", error);
+/**
+ * Main application component for Grassroots Post.
+ * Displays headlines and allows authorized users to create and edit reports.
+ */
+const App = () => {
+  const [reports, setReports] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [userId, setUserId] = useState(null);
+  const [userContext, setUserContext] = useState(null); // Holds the authenticated Firebase user object
+  const [isAdmin, setIsAdmin] = useState(false);
+  
+  // Modals and Forms
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [currentReport, setCurrentReport] = useState(null); // For editing
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState(null);
+
+  // Admin Modal State
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [adminUserIdInput, setAdminUserIdInput] = useState('');
+  const [adminMessage, setAdminMessage] = useState('');
+
+  // Report Form State
+  const [title, setTitle] = useState('');
+  const [headline, setHeadline] = useState('');
+  const [content, setContent] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  // --- Auth & Setup Effect ---
+  // Reruns the auth setup only once on mount to prevent Strict Mode re-runs from causing flickers.
+  useEffect(() => {
+    if (!auth) return;
+
+    // This function attempts to sign in using the provided token or anonymously.
+    const setupAuth = async () => {
+      try {
+        if (!auth.currentUser) {
+            if (initialAuthToken) {
+              await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+              await signInAnonymously(auth);
             }
-        };
+        }
+      } catch (e) {
+        console.error("Initial sign-in failed:", e);
+        setError("Failed to sign in. Please try refreshing.");
+      }
+    };
 
-        window.setupAuthListener = (callback) => {
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    // User is signed in (either custom token or anonymously)
-                    console.log("Auth State: Signed in. User ID:", user.uid);
-                    callback(user.uid);
-                } else {
-                    // User is signed out
-                    console.log("Auth State: Signed out.");
-                    callback(null);
-                }
-            });
-        };
-    </script>
+    // This listener updates the UI state whenever auth state changes.
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUserContext(user);
+      if (user) {
+        setUserId(user.uid);
+      } else {
+        setUserId(crypto.randomUUID()); 
+      }
+      // Auth state is resolved, even if user is anonymous/temp
+      setIsAuthReady(true); 
+    });
 
-    <!-- Header / Nav Bar -->
-    <header class="bg-white sticky top-0 z-10">
-        <!-- New green bar at the very top -->
-        <div class="color-accent h-2 w-full"></div> 
-        
-        <!-- Header Content -->
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center py-4">
-            <h1 class="text-xl font-extrabold text-gray-800 tracking-wider">THE GRASSROOTS POST</h1>
-            <nav class="hidden md:flex space-x-8 text-sm font-semibold text-gray-700">
-                <a href="#" class="hover:text-color-accent transition duration-150">MATCH REPORTS</a>
-                <a href="#" class="hover:text-color-accent transition duration-150">GRASSROOTS INVESTIGATIONS</a>
-                <a href="#" class="hover:text-color-accent transition duration-150">CONTACT</a>
-            </nav>
-        </div>
-    </header>
-
-    <!-- Main Content Area -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-
-        <!-- Hero Section -->
-        <section class="mb-12">
-            <h2 class="text-5xl font-extrabold text-gray-800 mb-2">THE GRASSROOTS GAME</h2>
-            <p class="text-xl text-gray-600 mb-6">Unrivaled match reporting and deep investigative features on youth football in Birmingham and the Midlands.</p>
-            <p class="text-sm text-gray-500" id="user-info-display">User ID: Loading...</p>
-        </section>
-        
-        <!-- Main Grid Layout -->
-        <div class="grid lg:grid-cols-3 gap-10">
-
-            <!-- Primary Content Column (Reports/Investigations) -->
-            <div class="lg:col-span-2">
-
-                <!-- Featured Investigation (Simulated) -->
-                <section class="mb-10 p-6 bg-white border border-gray-200 rounded-xl card-shadow flex flex-col md:flex-row gap-6">
-                    <div class="w-full md:w-1/3 bg-gray-100 rounded-lg flex items-center justify-center aspect-video md:aspect-square shrink-0">
-                        <span class="text-gray-400 font-medium text-sm">VISUAL: Youth Team Action Placeholder</span>
-                    </div>
-                    <div class="md:w-2/3">
-                        <p class="text-xs font-bold tracking-wider text-color-accent uppercase mb-1">INVESTIGATION</p>
-                        <h3 class="text-2xl font-bold text-gray-800 mb-3 leading-snug">The Price of Potential: How Pitch Fees Are Squeezing Birmingham's Talent Pipeline</h3>
-                        <p class="text-gray-600 mb-4 text-sm">An investigation into the rising costs of local facilities and the systemic barriers preventing low-income families from keeping kids in the game.</p>
-                        <p class="text-xs text-gray-500">Published Today by [Your Name]</p>
-                    </div>
-                </section>
-
-                <!-- Latest Match Reports Heading -->
-                <h3 class="text-3xl font-bold text-gray-800 mb-6">Latest Match Reports</h3>
-
-                <!-- Match Reports Grid -->
-                <section id="match-reports-container" class="grid sm:grid-cols-2 gap-6 mb-8">
-                    <!-- Reports will be inserted here by JavaScript -->
-                    <p class="text-gray-500 col-span-2">Loading reports...</p>
-                </section>
-
-                <!-- Load More Button (Simulated) -->
-                <div class="text-center mb-10">
-                    <button class="px-6 py-3 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition duration-150">
-                        Load More Match Reports
-                    </button>
-                </div>
-                
-                <!-- Publisher-Only: Create New Report Button -->
-                <section id="create-report-container" class="hidden text-center mb-10">
-                    <button id="create-report-button" class="w-full max-w-xl py-4 border-2 border-dashed border-color-accent text-color-accent rounded-xl hover:bg-green-50 transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-color-accent">
-                        <span class="flex items-center justify-center text-lg font-semibold">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                            </svg>
-                            Create New Report (Match or Investigation)
-                        </span>
-                        <p class="text-sm font-normal mt-1">Click here to enter and publish your next article to the front page.</p>
-                    </button>
-                </section>
-
-            </div>
-
-            <!-- Sidebar Column -->
-            <div class="lg:col-span-1">
-                
-                <!-- Investigations Widget -->
-                <div class="sidebar-widget bg-color-accent text-white card-shadow">
-                    <h4 class="text-lg font-bold mb-2">Grassroots Investigations</h4>
-                    <p class="text-sm mb-4 opacity-90">Deep dives into the urgent financial, ethical, and structural issues surrounding U18 and U16 football development in the Midlands.</p>
-                    <a href="#" class="inline-block px-4 py-2 text-sm font-semibold bg-white text-color-accent rounded-full hover:bg-gray-100 transition duration-150">
-                        Read All Investigative Reports
-                    </a>
-                </div>
-
-                <!-- About Reporter Widget -->
-                <div class="sidebar-widget bg-white border border-gray-200 card-shadow">
-                    <h4 class="text-lg font-bold text-gray-800 mb-2">About The Reporter</h4>
-                    <p class="text-sm text-gray-600 mb-4">
-                        [Your Name] covers the non-league scene, providing matchday insight and the crucial stories affecting the future of youth development.
-                    </p>
-                    <a href="#" class="text-sm font-medium text-color-accent hover:underline">
-                        Get in touch for Pitches & Tips →
-                    </a>
-                </div>
-
-            </div>
-        </div>
-    </main>
-
-    <!-- Footer -->
-    <footer class="color-primary-dark py-10 mt-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-white">
-            <p class="text-xl font-extrabold mb-2 tracking-tight">THE GRASSROOTS POST</p>
-            <p class="text-xs mb-4 opacity-70">© 2024 Independent Football Journalism for the Midlands.</p>
-            <nav class="flex justify-center space-x-6 text-sm">
-                <a href="#" class="opacity-80 hover:opacity-100 transition duration-150">Our Mission</a>
-                <a href="#" class="opacity-80 hover:opacity-100 transition duration-150">Pitches</a>
-                <a href="#" class="opacity-80 hover:opacity-100 transition duration-150">Archive</a>
-            </nav>
-        </div>
-    </footer>
+    setupAuth();
     
-    <!-- Publisher-Only Article Editor Modal (Hidden by default) -->
-    <div id="editor-modal" class="fixed inset-0 bg-gray-900 bg-opacity-70 hidden flex items-center justify-center p-4">
-        <div class="bg-white w-full max-w-4xl h-[90vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
-            <!-- Modal Header -->
-            <div class="flex justify-between items-center p-4 border-b">
-                <h2 class="text-xl font-bold text-gray-800">New Article Editor</h2>
-                <button id="close-editor" class="text-gray-400 hover:text-gray-600 transition duration-150 p-2 rounded-full hover:bg-gray-100">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-            
-            <!-- Modal Body (Form) -->
-            <div class="p-6 overflow-y-auto flex-grow">
-                <form id="article-form">
-                    
-                    <div class="mb-4">
-                        <label for="article-title" class="block text-sm font-medium text-gray-700 mb-1">Article Title (Max 80 chars)</label>
-                        <input type="text" id="article-title" name="article-title" required maxlength="80" 
-                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent text-lg font-semibold">
-                    </div>
+    // Cleanup function
+    return () => unsubscribe();
+  }, []); // Empty dependency array ensures this runs only once.
 
-                    <div class="mb-4 grid grid-cols-2 gap-4">
-                         <div>
-                            <label for="article-type" class="block text-sm font-medium text-gray-700 mb-1">Article Type (e.g., Midlands League, Investigation)</label>
-                            <input type="text" id="article-type" name="article-type" required 
-                                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent">
-                        </div>
-                        <div>
-                            <label for="article-badge-url" class="block text-sm font-medium text-gray-700 mb-1">Badge/Image URL (Optional)</label>
-                            <input type="url" id="article-badge-url" name="article-badge-url" placeholder="https://placehold.co/120x120/..."
-                                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent">
-                        </div>
-                    </div>
+  // --- Data Fetching Effect (Firestore Listener) ---
+  useEffect(() => {
+    // Wait until the authentication state is fully resolved before fetching data
+    if (!db || !isAuthReady) {
+        return;
+    }
 
-                    <div class="mb-6">
-                        <label for="article-content" class="block text-sm font-medium text-gray-700 mb-1">Full Article Content (Markdown Supported)</label>
-                        <textarea id="article-content" name="article-content" required rows="15" 
-                                  placeholder="Start writing your match report or investigation here. Note: You can use basic Markdown for formatting."
-                                  class="w-full p-3 border border-gray-300 rounded-lg focus:ring-color-accent focus:border-color-accent text-base"></textarea>
-                    </div>
-                </form>
-                
-                <!-- Notification Area -->
-                <div id="editor-message" class="text-sm font-medium p-3 rounded-lg hidden"></div>
-                
-            </div>
-            
-            <!-- Modal Footer (Actions) -->
-            <div class="p-4 border-t flex justify-end space-x-4">
-                <button type="button" id="publish-button" class="px-6 py-2 bg-color-accent text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150">
-                    Publish Article
-                </button>
-            </div>
-        </div>
+    const reportsPath = `/artifacts/${appId}/public/data/reports`;
+    const q = query(collection(db, reportsPath), orderBy("timestamp", "desc"));
+
+    // Set up real-time listener
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedReports = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate ? doc.data().timestamp.toDate() : new Date(),
+      }));
+      setReports(fetchedReports);
+      setIsLoading(false); // Only stop loading once the initial data fetch is complete
+    }, (err) => {
+      console.error("Error fetching reports:", err);
+      if (!err.code || err.code !== 'permission-denied') {
+          setError("Failed to load reports in real-time.");
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [db, isAuthReady]); // Dependent on isAuthReady to start fetching
+
+  // --- Handlers for Admin Sign-In ---
+  const handleAdminSignIn = useCallback(async () => {
+    setAdminMessage('');
+    
+    if (!userId || userId === 'default-app-id' || userId === ADMIN_USER_ID) {
+      setAdminMessage('Authentication is not ready. Please try refreshing.');
+      return;
+    }
+
+    if (adminPasswordInput !== ADMIN_PASSWORD) {
+      setAdminMessage('Incorrect secret password.');
+      return;
+    }
+
+    // Check if the entered UID matches the current session's authenticated UID
+    if (adminUserIdInput !== userId) {
+      setAdminMessage('Admin User ID does not match your current session ID.');
+      return;
+    }
+
+    // Success
+    setIsAdmin(true);
+    setShowAdminModal(false);
+    setAdminPasswordInput('');
+    setAdminUserIdInput('');
+  }, [adminPasswordInput, adminUserIdInput, userId]);
+
+  const handleOpenAdminModal = () => {
+    setAdminMessage('');
+    setAdminPasswordInput('');
+    setAdminUserIdInput('');
+    setShowAdminModal(true);
+  };
+
+  const handleAdminSignOut = () => {
+    setIsAdmin(false);
+  };
+
+  // --- Handlers for Report Management ---
+
+  const handleCreateReport = () => {
+    setCurrentReport(null);
+    setTitle('');
+    setHeadline('');
+    setContent('');
+    setShowReportModal(true);
+  };
+
+  const handleEditReport = (report) => {
+    setCurrentReport(report);
+    setTitle(report.title);
+    setHeadline(report.headline);
+    setContent(report.content);
+    setShowReportModal(true);
+  };
+
+  const handleViewReport = (report) => {
+    if (!isAdmin) {
+      setCurrentReport(report);
+      setTitle(report.title);
+      setHeadline(report.headline);
+      setContent(report.content);
+      setShowReportModal(true);
+    } else {
+      handleEditReport(report);
+    }
+  };
+
+  const handleSaveReport = async () => {
+    if (!title || !headline || !content) {
+      // Using an inline modal/message instead of alert
+      console.error("All fields must be filled.");
+      return;
+    }
+    if (!db) {
+        console.error("Database connection is not ready.");
+        return;
+    }
+    if (!isAdmin) {
+        console.error("You do not have permission to save reports.");
+        return;
+    }
+
+    setIsSaving(true);
+    try {
+      const reportData = {
+        title,
+        headline,
+        content,
+        authorId: userId,
+        timestamp: serverTimestamp(),
+        ...(currentReport && { updated: serverTimestamp() })
+      };
+      
+      const reportsCollection = collection(db, `/artifacts/${appId}/public/data/reports`);
+
+      if (currentReport) {
+        const reportRef = doc(reportsCollection, currentReport.id);
+        await updateDoc(reportRef, reportData);
+      } else {
+        await addDoc(reportsCollection, reportData);
+      }
+
+      setShowReportModal(false);
+    } catch (e) {
+      console.error("Error saving report: ", e);
+      // Fallback for user feedback
+      // Using console.error instead of alert
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteReport = (report) => {
+    setReportToDelete(report);
+    setShowConfirmationModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!reportToDelete || !db) return;
+    if (!isAdmin) {
+        // Using console.error instead of alert
+        console.error("You do not have permission to delete reports.");
+        return;
+    }
+
+    try {
+      const reportsCollection = collection(db, `/artifacts/${appId}/public/data/reports`);
+      const reportRef = doc(reportsCollection, reportToDelete.id);
+      await deleteDoc(reportRef);
+      setReportToDelete(null);
+      setShowConfirmationModal(false);
+    } catch (e) {
+      console.error("Error deleting report: ", e);
+      // Using console.error instead of alert
+    }
+  };
+
+  // --- Components ---
+
+  const AdminStatusIndicator = () => (
+    <div 
+      className={`fixed top-4 right-4 p-2 rounded-full cursor-pointer shadow-lg transition-colors duration-300 z-50 
+        ${isAdmin 
+          ? 'bg-green-500 hover:bg-green-600 text-white' 
+          : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'
+        }`}
+      onClick={isAdmin ? handleAdminSignOut : handleOpenAdminModal}
+      title={isAdmin ? "Editor Access Granted - Click to Sign Out" : "Sign In to Admin Editor"}
+    >
+      {isAdmin ? <ShieldCheck size={24} /> : <Lock size={24} />}
     </div>
+  );
 
-    <!-- Main Application Logic (Using Firebase) -->
-    <script type="module">
-        // Global variables for Firebase services and user ID
-        let db, auth, appId;
-        let userId = null;
-        let publisherId = null; 
+  const ReportModal = ({ report, onClose }) => {
+    const isEditing = !!report || currentReport;
+    const isReadOnly = !isAdmin || (report && !currentReport);
 
-        // --- Configuration ---
-        const initialReports = [
-            { id: 'report1', type: 'Midlands League', title: 'South Birmingham United Grind Out a Desperate 1-0 Win Over Lye Town', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' },
-            { id: 'report2', type: 'Reserves', title: 'Westside Reserves Show Flashes of Brilliance in 3-3 Thriller', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' },
-            { id: 'report3', type: 'Academy Fixture', title: 'Lichfield City\'s Midfield Overrun: Defensive Concerns After 4-1 Loss', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' },
-            { id: 'report4', type: 'Non-League Cup', title: 'Five Talking Points from Boldmere St Michaels\' Stoppage Time Drama', badge: 'https://placehold.co/120x120/E0E7FF/172554?text=Badge' }
-        ];
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+            <h2 className="text-2xl font-bold text-gray-800">
+              {isEditing ? (isAdmin ? "Edit Report" : "View Report") : "Create New Report"}
+            </h2>
+            <button 
+              onClick={onClose} 
+              className="p-1 rounded-full text-gray-500 hover:bg-gray-200"
+              title="Close"
+            >
+              <XCircle size={24} />
+            </button>
+          </div>
+          
+          {/* Body */}
+          <div className="p-6 overflow-y-auto space-y-4">
+            <div>
+              <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              <input
+                id="title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                readOnly={isReadOnly}
+                className={`w-full p-3 border rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 ${isReadOnly ? 'bg-gray-100' : 'bg-white'}`}
+                placeholder="The Main Title of the Report"
+              />
+            </div>
 
-        // --- Utility Functions ---
+            <div>
+              <label htmlFor="headline" className="block text-sm font-medium text-gray-700 mb-1">Headline (Short Summary)</label>
+              <input
+                id="headline"
+                type="text"
+                value={headline}
+                onChange={(e) => setHeadline(e.target.value)}
+                readOnly={isReadOnly}
+                className={`w-full p-3 border rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 ${isReadOnly ? 'bg-gray-100' : 'bg-white'}`}
+                placeholder="A compelling, short headline for the front page"
+              />
+            </div>
 
-        /**
-         * Generates the collection path for public data.
-         */
-        function getReportsCollectionPath() {
-            return `artifacts/${appId}/public/data/reports`;
-        }
-        
-        /**
-         * Clears the editor form and hides the modal.
-         */
-        function closeEditor() {
-            document.getElementById('editor-modal').classList.add('hidden');
-            document.getElementById('article-form').reset();
-            const msg = document.getElementById('editor-message');
-            msg.classList.add('hidden');
-            msg.innerText = '';
-        }
-        
-        /**
-         * Displays a temporary message in the editor modal.
-         */
-        function showMessage(text, isError = false) {
-            const msg = document.getElementById('editor-message');
-            msg.innerText = text;
-            msg.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800');
-            if (isError) {
-                msg.classList.add('bg-red-100', 'text-red-800');
-            } else {
-                msg.classList.add('bg-green-100', 'text-green-800');
-            }
-        }
+            <div>
+              <label htmlFor="content" className="block text-sm font-medium text-gray-700 mb-1">Report Content</label>
+              <textarea
+                id="content"
+                rows="10"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                readOnly={isReadOnly}
+                className={`w-full p-3 border rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 resize-none ${isReadOnly ? 'bg-gray-100' : 'bg-white'}`}
+                placeholder="Write the full body of the report here..."
+              />
+            </div>
+          </div>
 
-        /**
-         * Renders a single report card HTML.
-         */
-        function createReportCard(report) {
-            // Fallback for badge URL if not provided
-            const badgeUrl = report.badge && report.badge.trim() !== ''
-                ? report.badge
-                : 'https://placehold.co/120x120/E0E7FF/172554?text=Badge';
+          {/* Footer */}
+          <div className="p-4 border-t bg-gray-50 flex justify-end">
+            {isAdmin && !isReadOnly && (
+              <button
+                onClick={handleSaveReport}
+                disabled={isSaving}
+                className={`px-6 py-2 rounded-lg font-semibold text-white transition-all duration-200 flex items-center ${isSaving ? 'bg-green-300' : 'bg-green-600 hover:bg-green-700 shadow-md'}`}
+              >
+                {isSaving ? (
+                  <>
+                    <Loader size={20} className="animate-spin mr-2" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={20} className="mr-2" />
+                    Save Report
+                  </>
+                )}
+              </button>
+            )}
+            {!isAdmin && isReadOnly && (
+                <button
+                    onClick={onClose}
+                    className="px-6 py-2 rounded-lg font-semibold bg-gray-600 hover:bg-gray-700 text-white shadow-md"
+                >
+                    Close Viewer
+                </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-            return `
-                <div class="bg-white rounded-xl overflow-hidden border border-gray-200 card-shadow hover:shadow-lg transition duration-200">
-                    <div class="bg-gray-100 h-32 flex items-center justify-center">
-                        <img src="${badgeUrl}" alt="Team Badge Placeholder" class="max-h-full max-w-full object-contain p-4" onerror="this.onerror=null; this.src='https://placehold.co/120x120/E0E7FF/172554?text=Badge'">
+  const AdminSignInModal = ({ onClose }) => (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[110] p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+        <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+          <ShieldCheck className="mr-2 text-green-600" size={24} /> Admin Access
+        </h2>
+        <p className="text-sm text-gray-600">
+          Enter the secret password and confirm your unique session ID to gain editor privileges.
+        </p>
+
+        {/* Admin User ID Input */}
+        <div>
+          <label htmlFor="admin-uid" className="block text-sm font-medium text-gray-700 mb-1">
+            Admin User ID (Copy the ID below)
+          </label>
+          <input
+            id="admin-uid"
+            type="text"
+            value={adminUserIdInput}
+            onChange={(e) => setAdminUserIdInput(e.target.value)}
+            className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500"
+            placeholder="Paste your unique ID here"
+          />
+          <p className="mt-1 text-xs text-green-600 flex items-center">
+            <User size={14} className="mr-1" /> Your current session ID: <span className="font-bold break-words">{userId}</span>
+          </p>
+        </div>
+
+        {/* Password Input - Placeholder removed for security */}
+        <div>
+          <label htmlFor="admin-password" className="block text-sm font-medium text-gray-700 mb-1">
+            Secret Password
+          </label>
+          <input
+            id="admin-password"
+            type="password"
+            value={adminPasswordInput}
+            onChange={(e) => setAdminPasswordInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAdminSignIn()}
+            className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500"
+            // placeholder removed
+          />
+        </div>
+
+        {adminMessage && (
+          <p className={`text-sm p-2 rounded-lg font-medium ${adminMessage.includes('Incorrect') || adminMessage.includes('does not match') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+            <Info size={16} className="inline mr-1" /> {adminMessage}
+          </p>
+        )}
+
+        {/* Buttons */}
+        <div className="flex justify-end space-x-3 pt-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleAdminSignIn}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition shadow-md flex items-center"
+          >
+            <ShieldCheck size={20} className="mr-2" />
+            Grant Editor Access
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ConfirmationModal = ({ onConfirm, onCancel }) => (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[110] p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <h2 className="text-xl font-bold text-red-600 flex items-center">
+          <Trash2 className="mr-2" size={20} /> Confirm Deletion
+        </h2>
+        <p className="text-gray-700">
+          Are you sure you want to delete the report titled: <span className="font-bold">{reportToDelete?.title}</span>? This action cannot be undone.
+        </p>
+        <div className="flex justify-end space-x-3 pt-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition shadow-md flex items-center"
+          >
+            <Trash2 size={20} className="mr-2" />
+            Delete Permanently
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+
+  // --- Main Render ---
+
+  if (isLoading || !isAuthReady) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <Loader size={32} className="animate-spin text-green-500" />
+        <p className="ml-2 text-gray-600">Loading Application...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-red-50 p-4">
+        <p className="text-red-700 font-medium">Error: {error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans antialiased pb-16">
+      
+      <AdminStatusIndicator />
+
+      {/* Header - Styled to match THE GRASSROOTS POST brand */}
+      <header className="bg-white shadow-md">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row justify-between items-center border-t-8 border-green-700">
+          <div className="flex items-center space-x-8">
+            <h1 className="text-2xl font-extrabold text-[#111827] uppercase tracking-wider">
+              The Grassroots Post
+            </h1>
+            <nav className="hidden sm:flex space-x-4 text-sm font-semibold text-gray-600">
+              <a href="#" className="hover:text-green-700">MATCH REPORTS</a>
+              <a href="#" className="hover:text-green-700">BEHIND THE GOALPOSTS</a>
+              <a href="#" className="hover:text-green-700">CONTACT</a>
+            </nav>
+          </div>
+        </div>
+      </header>
+
+      {/* Hero / Title Section */}
+      <div className="max-w-6xl mx-auto px-4 pt-8 pb-4">
+        <h2 className="text-5xl font-extrabold text-gray-900 leading-tight">
+          THE GRASSROOTS GAME
+        </h2>
+        <p className="text-lg text-gray-500 mt-2">
+          Unrivaled match reporting and deep investigative features on youth football in Birmingham and the Midlands.
+        </p>
+      </div>
+
+      {/* Main Content: Reports Feed */}
+      <main className="max-w-6xl mx-auto p-4 space-y-6">
+
+        {/* ADMIN: Create New Report Box (Matches image styling) */}
+        {isAdmin && (
+            <div 
+                onClick={handleCreateReport} 
+                className="w-full bg-white border-2 border-dashed border-green-500 rounded-lg p-6 text-center cursor-pointer hover:bg-green-50 transition duration-200 shadow-sm mb-8"
+            >
+                <div className="flex items-center justify-center text-green-700">
+                    <Plus size={24} className="mr-3" />
+                    <span className="text-xl font-semibold">
+                        Create New Report (Match or Investigation)
+                    </span>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                    Click here to write and publish your next article to the front page.
+                </p>
+            </div>
+        )}
+
+        {/* Featured Investigation Section (Mockup based on image) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-2xl font-bold text-gray-800 mb-4">Featured Investigation</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="sm:col-span-1 bg-gray-100 h-32 rounded-lg flex items-center justify-center text-sm text-gray-500">
+                        VISUAL: Youth Team Action Placeholder
                     </div>
-                    <div class="p-4">
-                        <p class="text-xs font-bold tracking-wider text-red-500 uppercase mb-1">REPORT: ${report.type}</p>
-                        <h4 class="text-lg font-semibold text-gray-900 mb-2 leading-tight">${report.title}</h4>
-                        <a href="#" class="text-sm font-medium text-color-primary hover:underline transition duration-150">
-                            Read the Full Report →
-                        </a>
+                    <div className="sm:col-span-2">
+                        <span className="text-xs font-semibold text-red-600 uppercase tracking-wider">Investigation</span>
+                        <h4 className="text-xl font-bold text-gray-900 mt-1">
+                            The Price of Potential: How Pitch Fees Are Squeezing Birmingham's Talent Pipeline
+                        </h4>
+                        <p className="text-sm text-gray-600 mt-2 line-clamp-3">
+                            An investigation into the rising costs of local facilities and the systemic barriers preventing low-income families from participating in the grassroots game...
+                        </p>
+                        <p className="text-xs text-gray-400 mt-2">
+                            Published Today by [Your Name]
+                        </p>
                     </div>
                 </div>
-            `;
-        }
+            </div>
 
-        /**
-         * Saves a new article to Firestore.
-         */
-        async function saveArticle(event) {
-            event.preventDefault();
-            
-            const titleInput = document.getElementById('article-title');
-            const typeInput = document.getElementById('article-type');
-            const badgeInput = document.getElementById('article-badge-url');
-            const contentInput = document.getElementById('article-content');
+            {/* Sidebar (Mockup based on image) */}
+            <div className="space-y-6">
+                <div className="bg-green-700 rounded-xl p-4 text-white shadow-lg">
+                    <h3 className="text-lg font-bold">Behind the Goalposts</h3>
+                    <p className="text-sm mt-1">
+                        Deep dives into the urgent financial, ethical, and structural issues surrounding grassroots football development in the Midlands.
+                    </p>
+                    <button className="mt-3 w-full bg-white text-green-700 py-2 rounded-lg font-bold text-sm hover:bg-gray-100 transition">
+                        Read All Investigative Reports
+                    </button>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-lg border border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-800">About The Reporter</h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                        [Your Name] covers the non-league scene, providing match-day insight and the crucial stories affecting the future of youth development.
+                    </p>
+                    <p className="text-sm text-green-700 mt-2 cursor-pointer hover:underline">
+                        Get in touch for Pitches & Tips →
+                    </p>
+                </div>
+            </div>
+        </div>
 
-            // Basic validation
-            if (!titleInput.value || !typeInput.value || !contentInput.value) {
-                showMessage('Please fill out the Title, Type, and Content fields.', true);
-                return;
-            }
-            
-            const publishButton = document.getElementById('publish-button');
-            publishButton.disabled = true;
-            publishButton.innerText = 'Publishing...';
 
-            const newArticle = {
-                title: titleInput.value.trim(),
-                type: typeInput.value.trim(),
-                badge: badgeInput.value.trim(),
-                // Store the raw text/markdown in the content field.
-                content: contentInput.value.trim(), 
-                timestamp: Date.now(), // For sorting
-                authorId: userId,
-            };
+        <h3 className="text-2xl font-bold text-gray-800 mt-8 mb-4">Latest Match Reports</h3>
 
-            try {
-                // Use the timestamp as the document ID for simple unique ID generation
-                await setDoc(doc(db, getReportsCollectionPath(), newArticle.timestamp.toString()), newArticle);
-                showMessage('Article successfully published and is live on the front page!', false);
-                
-                // Wait briefly then close the editor
-                setTimeout(closeEditor, 2000); 
+        {reports.length === 0 && (
+          <div className="text-center p-12 bg-white rounded-xl shadow-lg mt-8">
+            <Info size={40} className="text-gray-400 mx-auto mb-4" />
+            <p className="text-lg text-gray-500">
+              {isAdmin ? "No reports found. Start by creating a new one!" : "No reports have been published yet."}
+            </p>
+          </div>
+        )}
 
-            } catch (error) {
-                console.error("Error publishing article: ", error);
-                showMessage(`Publishing Failed: ${error.message}`, true);
-            } finally {
-                publishButton.disabled = false;
-                publishButton.innerText = 'Publish Article';
-            }
-        }
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+          {reports.map((report) => (
+            <div key={report.id} className="bg-white rounded-xl shadow-lg p-4 hover:shadow-xl transition duration-300 border border-gray-100 flex flex-col justify-between">
+              
+              <div className="space-y-2">
+                <div className="h-20 bg-gray-100 rounded-lg flex items-center justify-center text-xs text-gray-500">
+                    Team Badge Placeholder
+                </div>
+                <p className="text-xs font-semibold text-red-600 uppercase tracking-wider flex justify-between">
+                    <span>REPORT: MIDLANDS LEAGUE</span>
+                    <span className="text-gray-400 font-normal">{new Date(report.timestamp).toLocaleDateString()}</span>
+                </p>
+                <h4 className="text-lg font-bold text-gray-900 line-clamp-3 mb-2">{report.title}</h4>
+              </div>
+              
+              <div className="mt-4">
+                  <button
+                      onClick={() => handleViewReport(report)}
+                      className="flex items-center text-sm font-medium text-green-700 hover:text-green-900 transition"
+                  >
+                      Read the Full Report →
+                  </button>
+                  
+                  {isAdmin && (
+                      <div className="flex space-x-3 mt-2 pt-2 border-t border-gray-100">
+                          <button
+                              onClick={() => handleEditReport(report)}
+                              className="flex items-center text-xs font-medium text-yellow-600 hover:text-yellow-800 transition"
+                          >
+                              <PenTool size={14} className="mr-1" />
+                              Edit
+                          </button>
+                          <button
+                              onClick={() => handleDeleteReport(report)}
+                              className="flex items-center text-xs font-medium text-red-600 hover:text-red-800 transition"
+                          >
+                              <Trash2 size={14} className="mr-1" />
+                              Delete
+                          </button>
+                      </div>
+                  )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="text-center pt-8">
+            <button className="px-6 py-2 border border-gray-300 rounded-full text-gray-700 font-medium hover:bg-gray-100 transition">
+                Load More Match Reports
+            </button>
+        </div>
+      </main>
 
-        /**
-         * Main function to load content from Firestore and manage the UI.
-         */
-        async function loadReports(currentUserId) {
-            const container = document.getElementById('match-reports-container');
-            const createReportContainer = document.getElementById('create-report-container');
+      {/* Footer */}
+      <footer className="bg-[#111827] text-white mt-16 py-8">
+        <div className="max-w-6xl mx-auto px-4 text-center">
+            <h5 className="text-xl font-extrabold uppercase tracking-wider mb-2">THE GRASSROOTS POST</h5>
+            <p className="text-xs text-gray-400 mb-4">
+                ©2024 Independent Football Journalism for the Midlands.
+            </p>
+            <div className="flex justify-center space-x-6 text-sm">
+                <a href="#" className="hover:text-green-500">Our Mission</a>
+                <a href="#" className="hover:text-green-500">Pitches</a>
+                <a href="#" className="hover:text-green-500">Archive</a>
+            </div>
+        </div>
+      </footer>
 
-            if (!db || !currentUserId) {
-                container.innerHTML = `<p class="text-red-500 col-span-2">Database not ready or user not authenticated.</p>`;
-                createReportContainer.classList.add('hidden');
-                return;
-            }
 
-            // --- Access Control Fix: Show/Hide Create Report Button ---
-            // Set the publisherId to the ID of the user who signed in initially (this works for the Canvas environment)
-            if (!publisherId) {
-                publisherId = currentUserId; 
-                document.getElementById('user-info-display').innerText = `User ID: ${currentUserId} (You are the Publisher)`;
-            }
+      {showReportModal && (
+        <ReportModal 
+          report={currentReport}
+          onClose={() => setShowReportModal(false)}
+        />
+      )}
 
-            if (currentUserId === publisherId) {
-                createReportContainer.classList.remove('hidden');
-                console.log("Publisher detected. 'Create Report' button is visible.");
-            } else {
-                createReportContainer.classList.add('hidden');
-                document.getElementById('user-info-display').innerText = `User ID: ${currentUserId}`;
-                console.log("Non-Publisher detected. 'Create Report' button is hidden.");
-            }
+      {showAdminModal && (
+        <AdminSignInModal onClose={() => setShowAdminModal(false)} />
+      )}
 
-            // --- Set up Firestore Listener ---
-            const reportsRef = collection(db, getReportsCollectionPath());
-            const q = query(reportsRef, orderBy("timestamp", "desc"), limit(6));
+      {showConfirmationModal && (
+        <ConfirmationModal
+            onConfirm={confirmDelete}
+            onCancel={() => setShowConfirmationModal(false)}
+        />
+      )}
+    </div>
+  );
+};
 
-            onSnapshot(q, (snapshot) => {
-                let reportsHtml = '';
-                let hasReports = false;
-
-                snapshot.forEach((doc) => {
-                    hasReports = true;
-                    const report = doc.data();
-                    reportsHtml += createReportCard(report);
-                });
-
-                if (hasReports) {
-                    container.innerHTML = reportsHtml;
-                } else {
-                    // Fallback to initial dummy data if Firestore is empty
-                    container.innerHTML = initialReports.map(createReportCard).join('');
-                    console.log("Firestore empty, displaying placeholder reports.");
-                }
-            }, (error) => {
-                console.error("Error listening to reports:", error);
-                container.innerHTML = `<p class="text-red-500 col-span-2">Error loading reports. Check console for details.</p>`;
-            });
-        }
-        
-        // --- Initialization ---
-
-        // 1. Wait for the imported functions and global objects to be set
-        window.addEventListener('load', () => {
-            db = window.db;
-            auth = window.auth;
-            appId = window.appId;
-
-            // 2. Set up the Authentication Listener
-            window.setupAuthListener(async (currentUserId) => {
-                userId = currentUserId;
-
-                if (userId) {
-                    // This is where the core logic is now called
-                    await loadReports(userId);
-                }
-            });
-
-            // 3. Start the Firebase Auth process
-            window.setupFirebaseAndLoadContent();
-
-            // 4. Attach Editor Button Handlers (Only runs if the user is the publisher)
-            const createButton = document.getElementById('create-report-button');
-            const closeButton = document.getElementById('close-editor');
-            const publishButton = document.getElementById('publish-button');
-            const editorModal = document.getElementById('editor-modal');
-
-            if (createButton) {
-                createButton.addEventListener('click', () => {
-                    // Show the editor modal
-                    editorModal.classList.remove('hidden');
-                });
-            }
-
-            if (closeButton) {
-                closeButton.addEventListener('click', closeEditor);
-            }
-            
-            if (publishButton) {
-                publishButton.addEventListener('click', saveArticle);
-            }
-        });
-    </script>
-</body>
-</html>
-
+export default App;
